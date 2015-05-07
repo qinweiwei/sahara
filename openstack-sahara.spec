@@ -1,3 +1,5 @@
+%global _without_doc 1
+%global with_doc %{!?_without_doc:1}%{?_without_doc:0}
 %if 0%{?rhel} && 0%{?rhel} <= 6
 %global have_rhel6 1
 %global want_systemd 0
@@ -79,22 +81,21 @@ Requires(postun): chkconfig
 %endif
 Requires(pre):    shadow-utils
 
+%description
+Sahara provides the ability to elastically manage Apache Hadoop clusters on
+OpenStack.
 
+%if 0%{?with_doc}
 %package doc
 Group:         Documentation
 Summary:       Usage documentation for the Sahara cluster management API
 Requires:      %{name} = %{version}
 
-
-%description
-Sahara provides the ability to elastically manage Apache Hadoop clusters on
-OpenStack.
-
-
 %description doc
 Sahara provides the ability to elastically manage Apache Hadoop clusters on
 OpenStack. This documentation provides instructions and examples on how to
 install, use, and manage the Sahara infrastructure.
+%endif
 
 
 %prep
@@ -122,13 +123,14 @@ chmod a+x sahara/plugins/vanilla/v2_3_0/resources/post_conf.template
 %build
 %{__python2} setup.py build
 
+%if 0%{?with_doc}
 export PYTHONPATH=$PWD:${PYTHONPATH}
 # Note: json warnings likely resolved w/ pygments 1.5 (not yet in Fedora)
 # make doc build compatible with python-oslo-sphinx RPM
 sed -i 's/oslosphinx/oslo.sphinx/' doc/source/conf.py
 sphinx-build doc/source html
 rm -rf html/.{doctrees,buildinfo}
-
+%endif
 
 %install
 %{__python2} setup.py install --skip-build --root %{buildroot}
@@ -155,10 +157,11 @@ rm -rf %{buildroot}%{python_sitelib}/sahara/tests
 
 mkdir -p -m0755 %{buildroot}/%{_localstatedir}/log/sahara
 
+%if 0%{?with_doc}
 # Copy built doc files for doc subpackage
 mkdir -p %{buildroot}/%{_pkgdocdir}
 cp -rp html %{buildroot}/%{_pkgdocdir}
-
+%endif
 
 %check
 # Building on koji with virtualenv requires test-requirements.txt and this
@@ -235,10 +238,10 @@ fi
 %{python_sitelib}/sahara
 %{python_sitelib}/sahara-%{version}-py?.?.egg-info
 
-
+%if 0%{?with_doc}
 %files doc
 %{_pkgdocdir}/html 
-
+%endif
 
 %changelog
 * Thu Jul 17 2014 Pádraig Brady <pbrady@redhat.com> - 2014.1.1-1
