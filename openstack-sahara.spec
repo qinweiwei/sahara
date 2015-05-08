@@ -36,8 +36,8 @@ BuildArch:     noarch
 #
 # patches_base=2014.1.1
 #
-Patch0001: 0001-remove-runtime-dep-on-python-pbr.patch
-Patch0002: 0002-reference-actual-plugins-shipped-in-tarball.patch
+#Patch0001: 0001-remove-runtime-dep-on-python-pbr.patch
+#Patch0002: 0002-reference-actual-plugins-shipped-in-tarball.patch
 
 BuildRequires: python2-devel
 BuildRequires: python-setuptools
@@ -101,8 +101,8 @@ install, use, and manage the Sahara infrastructure.
 %prep
 %setup -q -n sahara-%{version}
 
-%patch0001 -p1
-%patch0002 -p1
+#%patch0001 -p1
+#%patch0002 -p1
 
 sed -i s/REDHAT_SAHARA_VERSION/%{version}/ sahara/version.py
 sed -i s/REDHAT_SAHARA_RELEASE/%{release}/ sahara/version.py
