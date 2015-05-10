@@ -1,5 +1,8 @@
-%global _without_doc 1
-%global with_doc %{!?_without_doc:1}%{?_without_doc:0}
+#
+# This is 2014.2 Juno release
+#
+%global release_name juno
+
 %if 0%{?rhel} && 0%{?rhel} <= 6
 %global have_rhel6 1
 %global want_systemd 0
@@ -22,22 +25,19 @@
 %endif
 
 Name:          openstack-sahara
-Version:       2014.1.1
+Version:       2014.2.2
 Release:       1%{?dist}
 Provides:      openstack-savanna = %{version}-%{release}
 Summary:       Apache Hadoop cluster management on OpenStack
 License:       ASL 2.0
 URL:           https://launchpad.net/sahara
-Source0:       http://tarballs.openstack.org/sahara/sahara-%{version}.tar.gz
-Source1:       openstack-sahara-api.service
-Source2:       openstack-sahara-api.init
+Source0:       http://launchpad.net/sahara/%{release_name}/%{version}/+download/sahara-%{version}.tar.gz
+Source1:       openstack-sahara-all.service
+Source2:       openstack-sahara-all.init
 BuildArch:     noarch
 
-#
-# patches_base=2014.1.1
-#
-#Patch0001: 0001-remove-runtime-dep-on-python-pbr.patch
-#Patch0002: 0002-reference-actual-plugins-shipped-in-tarball.patch
+Patch0001: 0001-remove-runtime-dep-on-python-pbr.patch
+Patch0002: 0002-reference-actual-plugins-shipped-in-tarball.patch
 
 BuildRequires: python2-devel
 BuildRequires: python-setuptools
@@ -51,24 +51,31 @@ BuildRequires: python-pbr >= 0.5.19
 BuildRequires: systemd-units
 %endif
 
-Requires: python-alembic
+Requires: python-alembic >= 0.6.4
 #?Babel>=1.3?
-Requires: python-eventlet
-Requires: python-flask
-Requires: python-iso8601
-Requires: python-jsonschema >= 1.3.0
-Requires: python-oslo-config >= 1.2.0
-Requires: python-oslo-messaging
-Requires: python-paramiko >= 1.9.0
-Requires: python-cinderclient >= 1.0.5
-Requires: python-keystoneclient >= 0.6.0
-Requires: python-novaclient >= 2.15.0
-Requires: python-swiftclient
-Requires: python-neutronclient
-Requires: python-six >= 1.4.1
-Requires: python-stevedore >= 0.14
-Requires: python-webob
+Requires: python-cinderclient >= 1.0.9
+Requires: python-eventlet >= 0.15.1
+Requires: python-flask >= 0.10
+Requires: python-heatclient >= 0.2.9
+Requires: python-iso8601 >= 0.1.9
+Requires: python-jsonschema >= 2.0.0
+Requires: python-keystoneclient >= 0.10.0
+Requires: python-keystonemiddleware >= 1.0.0
+Requires: python-neutronclient >= 2.3.6
+Requires: python-novaclient >= 2.18.0
+Requires: python-oslo-config >= 1.4.0
+Requires: python-oslo-db >= 0.4.0
+Requires: python-oslo-i18n >= 0.3.0
+Requires: python-oslo-messaging >= 1.4.0
+Requires: python-oslo-serialization >= 0.3.0
+Requires: python-paramiko >= 1.10.0
+Requires: python-posix_ipc
+Requires: python-requests >= 1.2.1
+Requires: python-six >= 1.7.0
 Requires: python-sqlalchemy
+Requires: python-stevedore >= 0.14
+Requires: python-swiftclient >= 2.1.0
+Requires: python-webob >= 1.2.3
 
 %if %{want_systemd}
 Requires(post):   systemd
@@ -81,31 +88,34 @@ Requires(postun): chkconfig
 %endif
 Requires(pre):    shadow-utils
 
-%description
-Sahara provides the ability to elastically manage Apache Hadoop clusters on
-OpenStack.
 
-%if 0%{?with_doc}
 %package doc
 Group:         Documentation
 Summary:       Usage documentation for the Sahara cluster management API
 Requires:      %{name} = %{version}
 
+
+%description
+Sahara provides the ability to elastically manage Apache Hadoop clusters on
+OpenStack.
+
+
 %description doc
 Sahara provides the ability to elastically manage Apache Hadoop clusters on
 OpenStack. This documentation provides instructions and examples on how to
 install, use, and manage the Sahara infrastructure.
-%endif
 
 
 %prep
 %setup -q -n sahara-%{version}
 
-#%patch0001 -p1
-#%patch0002 -p1
+%patch0001 -p1
+%patch0002 -p1
 
 sed -i s/REDHAT_SAHARA_VERSION/%{version}/ sahara/version.py
 sed -i s/REDHAT_SAHARA_RELEASE/%{release}/ sahara/version.py
+
+sed -i 's/%{version}/%{version}/' PKG-INFO
 
 rm -rf sahara.egg-info
 rm -f test-requirements.txt
@@ -113,33 +123,36 @@ rm -f test-requirements.txt
 sed -i 's,etc/sahara/\*,etc/sahara/sahara.conf.sample,' setup.cfg
 # remove the shbang from these files to supress rpmlint warnings, these are
 # python based scripts that get processed to form the installed shell scripts.
+sed -i 1,2d sahara/cli/sahara_all.py
 sed -i 1,2d sahara/cli/sahara_api.py
+sed -i 1,2d sahara/cli/sahara_engine.py
 sed -i 1,2d sahara/cli/sahara_subprocess.py
-# set executable on this file to supress rpmlint warnings, it is used as a
-# template to create shell scripts.
-chmod a+x sahara/plugins/vanilla/v2_3_0/resources/post_conf.template
-
+# set executable on these files to supress rpmlint warnings, they are used as
+# templates to create shell scripts.
+chmod a+x sahara/plugins/vanilla/hadoop2/resources/post_conf.template
+chmod a+x sahara/plugins/spark/resources/spark-env.sh.template
+# also set executable on this topology script, should have been set upstream
+chmod a+x sahara/plugins/spark/resources/topology.sh
 
 %build
 %{__python2} setup.py build
 
-%if 0%{?with_doc}
 export PYTHONPATH=$PWD:${PYTHONPATH}
 # Note: json warnings likely resolved w/ pygments 1.5 (not yet in Fedora)
 # make doc build compatible with python-oslo-sphinx RPM
 sed -i 's/oslosphinx/oslo.sphinx/' doc/source/conf.py
 sphinx-build doc/source html
 rm -rf html/.{doctrees,buildinfo}
-%endif
+
 
 %install
 %{__python2} setup.py install --skip-build --root %{buildroot}
 
 %if %{want_systemd}
-install -p -D -m 644 %{SOURCE1} %{buildroot}%{_unitdir}/openstack-sahara-api.service
+install -p -D -m 644 %{SOURCE1} %{buildroot}%{_unitdir}/openstack-sahara-all.service
 %else
 install -d -m 755 %{buildroot}%{_localstatedir}/run/sahara
-install -p -D -m 755 %{SOURCE2} %{buildroot}%{_initrddir}/openstack-sahara-api
+install -p -D -m 755 %{SOURCE2} %{buildroot}%{_initrddir}/openstack-sahara-all
 %endif
 
 HOME=%{_sharedstatedir}/sahara
@@ -150,18 +163,16 @@ SAMPLE=%{buildroot}%{_datadir}/sahara/sahara.conf.sample
 CONF=%{buildroot}%{_sysconfdir}/sahara/sahara.conf
 install -d -m 755 $(dirname $CONF)
 install -D -m 640 $SAMPLE $CONF
-sed -i -e "s,.*connection=.*,connection=sqlite:///$HOME/sahara-server.db," $CONF
 
 # Do not package tests
 rm -rf %{buildroot}%{python_sitelib}/sahara/tests
 
 mkdir -p -m0755 %{buildroot}/%{_localstatedir}/log/sahara
 
-%if 0%{?with_doc}
 # Copy built doc files for doc subpackage
 mkdir -p %{buildroot}/%{_pkgdocdir}
 cp -rp html %{buildroot}/%{_pkgdocdir}
-%endif
+
 
 %check
 # Building on koji with virtualenv requires test-requirements.txt and this
@@ -186,30 +197,30 @@ exit 0
 %post
 # TODO: if db file then sahara-db-manage update head
 %if %{want_systemd}
-%systemd_post openstack-sahara-api.service
+%systemd_post openstack-sahara-all.service
 %else
-/sbin/chkconfig --add openstack-sahara-api
+/sbin/chkconfig --add openstack-sahara-all
 %endif
 
 
 %preun
 %if %{want_systemd}
-%systemd_preun openstack-sahara-api.service
+%systemd_preun openstack-sahara-all.service
 %else
 if [ $1 -eq 0 ] ; then
-   /sbin/service openstack-sahara-api stop >/dev/null 2>&1
-   /sbin/chkconfig --del openstack-sahara-api
+   /sbin/service openstack-sahara-all stop >/dev/null 2>&1
+   /sbin/chkconfig --del openstack-sahara-all
 fi
 %endif
 
 
 %postun
 %if %{want_systemd}
-%systemd_postun_with_restart openstack-sahara-api.service
+%systemd_postun_with_restart openstack-sahara-all.service
 %else
 if [ $1 -ge 1 ] ; then
    # Package upgrade, not uninstall
-   /sbin/service openstack-sahara-api condrestart > /dev/null 2>&1 || :
+   /sbin/service openstack-sahara-all condrestart > /dev/null 2>&1 || :
 fi
 %endif
 
@@ -219,31 +230,71 @@ fi
 
 %if %{have_rhel6}
 %dir %attr(0755, %{sahara_user}, root) %{_localstatedir}/run/sahara
-%{_initrddir}/openstack-sahara-api
+%{_initrddir}/openstack-sahara-all
 %else
-%{_unitdir}/openstack-sahara-api.service
+%{_unitdir}/openstack-sahara-all.service
 %endif
 
 %dir %{_sysconfdir}/sahara
 # Note: this file is not readable because it holds auth credentials
 %config(noreplace) %attr(-, root, %{sahara_group}) %{_sysconfdir}/sahara/sahara.conf
+%{_bindir}/sahara-all
 %{_bindir}/sahara-api
+%{_bindir}/sahara-engine
 %{_bindir}/_sahara-subprocess
 %{_bindir}/sahara-db-manage
 %dir %attr(-, %{sahara_user}, %{sahara_group}) %{_sharedstatedir}/sahara
-%dir %attr(-, %{sahara_user}, %{sahara_group}) %{_localstatedir}/log/sahara
+%dir %attr(0750, %{sahara_user}, %{sahara_group}) %{_localstatedir}/log/sahara
 # Note: permissions on sahara's home are intentially 0700
 %dir %{_datadir}/sahara
 %{_datadir}/sahara/sahara.conf.sample
 %{python_sitelib}/sahara
 %{python_sitelib}/sahara-%{version}-py?.?.egg-info
 
-%if 0%{?with_doc}
+
 %files doc
-%{_pkgdocdir}/html 
-%endif
+%{_pkgdocdir}/html
+
 
 %changelog
+* Thu Feb 05 2015 Ethan Gafford <egafford@redhat.com> 2014.2.2-1
+- Update to upstream 2014.2.2
+
+* Tue Dec 09 2014 Ethan Gafford <egafford@redhat.com> 2014.2.1-2
+- Removed sed replacement of default connection in /etc/sahara/sahara.conf
+- Resolves rhbz#1162304
+
+* Tue Dec 09 2014 Ethan Gafford <egafford@redhat.com> 2014.2.1-1
+- Update to upstream 2014.2.1
+- Changing log directory permissions to 0750.
+
+* Fri Oct 17 2014 Michael McCune <mimccune@redhat.com> 2014.2
+- Juno release
+
+* Tue Oct 07 2014 Michael McCune <mimccune@redhat.com> 2014.2-0.3.rc2
+- Update to upstream 2014.2.rc2
+
+* Tue Oct 07 2014 Michael McCune <mimccune@redhat.com> 2014.2-0.2.rc1
+- updating dependencies
+
+* Thu Oct 02 2014 Michael McCune <mimccune@redhat.com> 2014.2-0.1.rc1
+- Update to upstream 2014.2.rc1
+
+* Wed Sep 24 2014 Michael McCune <mimccune@redhat.com> 2014.2-0.4.b3
+- Bug fixes to upstream 2014.2.b3
+- Resolves: rhbz#1144529
+- Resolves: rhbz#1144531
+- adding patch to fix keystonemiddleware==1.0.0 issues
+
+* Tue Sep 16 2014 Michael McCune <mimccune@redhat.com> - 2014.2-0.3.b3
+- spec cleanup
+
+* Tue Sep 16 2014 Michael McCune <mimccune@redhat.com> - 2014.2-0.2.b3
+- juno-3 milestone
+
+* Wed Jul 30 2014 Michael McCune <mimccune@redhat.com> - 2014.2-0.2.b2
+- juno-2 milestone
+
 * Thu Jul 17 2014 Pádraig Brady <pbrady@redhat.com> - 2014.1.1-1
 - Stable icehouse 2014.1.1 rebase
 
