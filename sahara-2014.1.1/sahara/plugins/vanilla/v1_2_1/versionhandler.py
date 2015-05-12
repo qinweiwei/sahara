@@ -201,6 +201,7 @@ class VersionHandler(avm.AbstractVersionHandler):
                 cluster, CONF.enable_hypervisor_awareness)
             extra['topology_data'] = "\n".join(
                 [k + " " + v for k, v in topology_data.items()]) + "\n"
+        c_helper.get_hadoop_ssh_keys(cluster,extra)
 
         return extra
 
@@ -276,7 +277,7 @@ class VersionHandler(avm.AbstractVersionHandler):
 
     def _push_configs_to_new_node(self, cluster, extra, instance):
         ng_extra = extra[instance.node_group.id]
-        private_key, public_key = c_helper.get_hadoop_ssh_keys(cluster)
+        private_key, public_key= c_helper.get_hadoop_ssh_keys(cluster,extra)
 
         files = {
             '/etc/hadoop/core-site.xml': ng_extra['xml']['core-site'],

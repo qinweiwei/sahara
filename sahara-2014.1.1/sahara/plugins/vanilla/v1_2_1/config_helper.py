@@ -227,15 +227,18 @@ def _get_hostname(service):
     return service.hostname() if service else None
 
 
-def get_hadoop_ssh_keys(cluster):
-    extra = cluster.extra or {}
+def get_hadoop_ssh_keys(cluster,extra):
+    if cluster.extra:
+        extra.update(cluster.extra)
+    nextra = {}
     private_key = extra.get('hadoop_private_ssh_key')
     public_key = extra.get('hadoop_public_ssh_key')
     if not private_key or not public_key:
         private_key, public_key = crypto.generate_key_pair()
-        extra['hadoop_private_ssh_key'] = private_key
-        extra['hadoop_public_ssh_key'] = public_key
-        conductor.cluster_update(context.ctx(), cluster, {'extra': extra})
+        nextra['hadoop_private_ssh_key'] = private_key
+        nextra['hadoop_public_ssh_key'] = public_key
+        conductor.cluster_update(context.ctx(), cluster, {'extra': nextra})
+        extra.update(nextra)
 
     return private_key, public_key
 
