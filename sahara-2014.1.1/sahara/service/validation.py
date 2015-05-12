@@ -63,7 +63,8 @@ def check_exists(get_func, *id_prop, **get_args):
 
             get_kwargs = {}
             for get_arg in get_args:
-                get_kwargs[get_arg] = kwargs[get_args[get_arg]]
+                #get_kwargs[get_arg] = kwargs[get_args[get_arg]]
+                get_kwargs[get_arg] = kwargs.get(get_args[get_arg], None)
 
             obj = None
             try:

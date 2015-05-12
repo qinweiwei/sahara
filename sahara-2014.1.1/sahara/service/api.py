@@ -44,12 +44,17 @@ def setup_service_api(engine):
 
 ## Cluster ops
 
-def get_clusters():
-    return conductor.cluster_get_all(context.ctx())
+def get_clusters(all_tenants=None):
+    ctx = context.ctx()
+    if all_tenants and 'admin' in ctx.roles:
+        ctx = context.get_admin_context()
+    return conductor.cluster_get_all(ctx)
 
-
-def get_cluster(id):
-    return conductor.cluster_get(context.ctx(), id)
+def get_cluster(id, all_tenants=None):
+    ctx = context.ctx()
+    if all_tenants and 'admin' in ctx.roles:
+        ctx = context.get_admin_context()
+    return conductor.cluster_get(ctx, id)
 
 
 def scale_cluster(id, data):
