@@ -73,7 +73,8 @@ def _create_attach_volume(ctx, instance, size, display_name=None,
                           volume_type=None):
     volume = cinder.client().volumes.create(size=size,
                                             display_name=display_name,
-                                            volume_type=volume_type)
+                                            volume_type=volume_type,
+                                            lvm_instance_id=instance.instance_id)
     conductor.append_volume(ctx, instance, volume.id)
 
     while volume.status != 'available':
