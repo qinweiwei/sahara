@@ -13,17 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from pbr import version
 
-class VersionInfo(object):
-    release = '1.el6'
-    version = '2014.2.2'
-    package = 'sahara'
-
-    def version_string(self):
-        return self.version
-
-    def release_string(self):
-        return self.release
-
-
-version_info = VersionInfo()
+version_info = version.VersionInfo('sahara')

@@ -47,6 +47,10 @@ class VanillaProvider(p.ProvisioningPluginBase):
         return self._get_version_handler(
             cluster.hadoop_version).configure_cluster(cluster)
 
+    def monitor_cluster(self, cluster):
+        return self._get_version_handler(
+            cluster.hadoop_version).monitor_cluster(cluster)
+
     def start_cluster(self, cluster):
         return self._get_version_handler(
             cluster.hadoop_version).start_cluster(cluster)
@@ -75,3 +79,6 @@ class VanillaProvider(p.ProvisioningPluginBase):
     def get_open_ports(self, node_group):
         return self._get_version_handler(
             node_group.cluster.hadoop_version).get_open_ports(node_group)
+    def on_terminate_cluster(self, cluster):
+        return self._get_version_handler(
+            cluster.hadoop_version).on_terminate_cluster(cluster)

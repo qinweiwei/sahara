@@ -84,7 +84,9 @@ class Rest(flask.Blueprint):
 
                 if flask.request.method in ['POST', 'PUT']:
                     kwargs['data'] = request_data()
-
+                #add args 
+                else:
+                    kwargs.update(flask.request.args.to_dict())
                 try:
                     return func(**kwargs)
                 except ex.SaharaException as e:

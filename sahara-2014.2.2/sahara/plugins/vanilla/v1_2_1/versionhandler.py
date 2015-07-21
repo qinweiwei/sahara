@@ -35,6 +35,7 @@ from sahara.topology import topology_helper as th
 from sahara.utils import edp
 from sahara.utils import files as f
 from sahara.utils import general as g
+from sahara.utils import proxy
 from sahara.utils import remote
 
 
@@ -102,6 +103,9 @@ class VersionHandler(avm.AbstractVersionHandler):
 
         self._setup_instances(cluster, instances)
 
+    def monitor_cluster(self, cluster):
+        pass
+
     def start_cluster(self, cluster):
         nn_instance = vu.get_namenode(cluster)
         with remote.get_remote(nn_instance) as r:
@@ -139,8 +143,12 @@ class VersionHandler(avm.AbstractVersionHandler):
                 run.hive_create_warehouse_dir(r)
                 run.hive_copy_shared_conf(
                     r, edp.get_hive_shared_conf_path('hadoop'))
-
-                if c_helper.is_mysql_enable(cluster):
+                if c_helper.hive_metastore_value(cluster) == c_helper.HIVE_METASTOER_RDS:
+                    run.hive_metastore_start(r)
+                    LOG.info(_LI("Hive Metastore server at %s has been "
+                                 "started"),
+                             hive_server.hostname())
+                elif c_helper.hive_metastore_value(cluster) == c_helper.HIVE_METASTOER_MYSQL:
                     if not oozie or hive_server.hostname() != oozie.hostname():
                         run.mysql_start(r, hive_server)
                     run.hive_create_db(r, cluster.extra['hive_mysql_passwd'])
@@ -267,6 +275,11 @@ class VersionHandler(avm.AbstractVersionHandler):
             run.start_processes(r, *tt_dn_procs)
 
     def _setup_instances(self, cluster, instances):
+        if (CONF.use_identity_api_v3 and vu.get_hiveserver(cluster) and
+                c_helper.is_swift_enable(cluster)):
+            cluster = proxy.create_proxy_user_for_cluster(cluster)
+            instances = utils.get_instances(cluster)
+
         extra = self._extract_configs_to_extra(cluster)
         cluster = conductor.cluster_get(context.ctx(), cluster)
         self._push_configs_to_nodes(cluster, extra, instances)
@@ -522,3 +535,5 @@ class VersionHandler(avm.AbstractVersionHandler):
             ports.append(10000)
 
         return ports
+    def on_terminate_cluster(self, cluster):
+        proxy.delete_proxy_user_for_cluster(cluster)

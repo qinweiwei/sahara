@@ -21,6 +21,8 @@ is to hide some necessary magic. Current module describes objects
 fields via docstrings and contains implementation of helper methods.
 """
 
+import random
+
 from oslo.config import cfg
 
 from sahara.utils import configs
@@ -60,6 +62,22 @@ class Cluster(object):
     cluster_template - ClusterTemplate object
     """
 
+    def has_proxy_gateway(self):
+        for ng in self.node_groups:
+            if ng.is_proxy_gateway:
+                return True
+
+    def get_proxy_gateway_node(self):
+        proxies = []
+        for ng in self.node_groups:
+            if ng.is_proxy_gateway and ng.instances:
+                proxies += ng.instances
+
+        if proxies:
+            return random.choice(proxies)
+
+        return None
+
 
 class NodeGroup(object):
     """An object representing Node Group.
@@ -80,8 +98,11 @@ class NodeGroup(object):
     security_groups - List of security groups for instances in this Node Group
     auto_security_group - indicates if Sahara should create additional
                           security group for the Node Group
+    availability_zone - name of Nova availability zone where to spawn instances
     open_ports - List of ports that will be opened if auto_security_group is
                  True
+    is_proxy_gateway - indicates if nodes from this node group should be used
+                       as proxy to access other cluster nodes
 
     count
     instances - list of Instance objects
@@ -177,6 +198,8 @@ class NodeGroupTemplate(object):
     floating_ip_pool
     security_groups
     auto_security_group
+    availability_zone
+    is_proxy_gateway
     """
 
 

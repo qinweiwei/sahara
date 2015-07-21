@@ -66,6 +66,9 @@ class LocalOps(object):
     def run_edp_job(self, job_execution_id):
         context.spawn("Starting Job Execution %s" % job_execution_id,
                       _run_edp_job, job_execution_id)
+    def provision_update_cluster(self, cluster_id, data):
+        context.spawn("cluster-scaling %s" % cluster_id,
+                      _provision_update_cluster, cluster_id, data)
 
 
 class RemoteOps(rpc_utils.RPCClient):
@@ -85,7 +88,10 @@ class RemoteOps(rpc_utils.RPCClient):
 
     def run_edp_job(self, job_execution_id):
         self.cast('run_edp_job', job_execution_id=job_execution_id)
-
+    
+    def provision_update_cluster(self, cluster_id, data):
+        self.cast('provision_update_cluster', cluster_id=cluster_id,
+                  data=data)
 
 class OpsServer(rpc_utils.RPCServer):
     def __init__(self):
@@ -104,6 +110,9 @@ class OpsServer(rpc_utils.RPCServer):
 
     def run_edp_job(self, job_execution_id):
         _run_edp_job(job_execution_id)
+    
+    def provision_update_cluster(self, cluster_id, data):
+        _provision_update_cluster(cluster_id, data)        
 
 
 def ops_error_handler(f):
@@ -201,6 +210,9 @@ def _provision_cluster(cluster_id):
     cluster = g.change_cluster_status(cluster, "Configuring")
     plugin.configure_cluster(cluster)
 
+    cluster = g.change_cluster_status(cluster, "Monitoring")
+    plugin.monitor_cluster(cluster)
+
     # starting prepared and configured cluster
     cluster = g.change_cluster_status(cluster, "Starting")
     plugin.start_cluster(cluster)
@@ -244,6 +256,23 @@ def _provision_scaled_cluster(cluster_id, node_group_id_map):
 
     g.change_cluster_status(cluster, "Active")
 
+@ops_error_handler
+def _provision_update_cluster(cluster_id, data):
+
+    ctx = context.ctx()
+
+    cluster = conductor.cluster_get(ctx, cluster_id)
+    g.change_cluster_status(cluster, "Updating")
+        
+    if CONF.use_identity_api_v3 and data['is_transient']:
+        trusts.create_trust_for_cluster(cluster)
+    if CONF.use_identity_api_v3 and not cluster.is_transient:
+        trusts.delete_trust_from_cluster(cluster)
+    conductor.cluster_update(ctx,
+                             cluster,
+                             {'is_transient': data['is_transient']})
+    g.change_cluster_status(cluster, "Active")
+    
 
 @ops_error_handler
 def terminate_cluster(cluster_id):

@@ -20,10 +20,12 @@ from sahara.service import validation as v
 from sahara.service.validations import cluster_templates as v_ct
 from sahara.service.validations import clusters as v_c
 from sahara.service.validations import clusters_scaling as v_c_s
+from sahara.service.validations import clusters_update as v_c_u
 from sahara.service.validations import images as v_images
 from sahara.service.validations import node_group_templates as v_ngt
 from sahara.service.validations import plugins as v_p
 import sahara.utils.api as u
+from sahara import context
 
 
 LOG = logging.getLogger(__name__)
@@ -34,8 +36,9 @@ rest = u.Rest('v10', __name__)
 # Cluster ops
 
 @rest.get('/clusters')
-def clusters_list():
-    return u.render(clusters=[c.to_dict() for c in api.get_clusters()])
+def clusters_list(**kwargs):
+    all_tenants = kwargs.get('all_tenants', None)
+    return u.render(clusters=[c.to_dict() for c in api.get_clusters(all_tenants)])
 
 
 @rest.post('/clusters')
@@ -50,16 +53,23 @@ def clusters_create(data):
 def clusters_scale(cluster_id, data):
     return u.render(api.scale_cluster(cluster_id, data).to_wrapped_dict())
 
+@rest.put('/clusters/<cluster_id>/update')
+@v.check_exists(api.get_cluster, 'cluster_id')
+@v.validate(v_c_u.CLUSTER_UPDATE_SCHEMA, v_c_u.check_cluster_update)
+def clusters_update(cluster_id, data):
+    return u.render(api.update_cluster(cluster_id, data).to_wrapped_dict())
+
 
 @rest.get('/clusters/<cluster_id>')
-@v.check_exists(api.get_cluster, 'cluster_id')
-def clusters_get(cluster_id):
-    return u.render(api.get_cluster(cluster_id).to_wrapped_dict())
+@v.check_exists(api.get_cluster, id='cluster_id', all_tenants='all_tenants')
+def clusters_get(cluster_id,**kwargs):
+    all_tenants = kwargs.get('all_tenants', None)
+    return u.render(api.get_cluster(cluster_id, all_tenants).to_wrapped_dict())
 
 
 @rest.delete('/clusters/<cluster_id>')
-@v.check_exists(api.get_cluster, 'cluster_id')
-def clusters_delete(cluster_id):
+@v.check_exists(api.get_cluster, id='cluster_id', all_tenants='all_tenants')
+def clusters_delete(cluster_id, **kwargs):
     api.terminate_cluster(cluster_id)
     return u.render()
 

@@ -1,0 +1,8 @@
+define contact{{
+        contact_name                    {name}
+        use                             generic-contact
+        alias                           {alias}
+        email                           {email}
+        }}
+
+

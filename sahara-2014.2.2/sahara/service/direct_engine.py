@@ -307,8 +307,8 @@ class DirectEngine(e.Engine):
         security_groups = self._map_security_groups(node_group.security_groups)
         nova_kwargs = {'scheduler_hints': hints, 'userdata': userdata,
                        'key_name': cluster.user_keypair_id,
-                       'security_groups': security_groups}
-
+                       'security_groups': security_groups,
+                       'availability_zone': node_group.availability_zone}
         if CONF.use_neutron:
             net_id = cluster.neutron_management_network
             nova_kwargs['nics'] = [{"net-id": net_id, "v4-fixed-ip": ""}]
@@ -449,7 +449,11 @@ class DirectEngine(e.Engine):
     def _delete_auto_security_group(self, node_group):
         if not node_group.auto_security_group:
             return
-
+        
+        if not node_group.security_groups:
+            # node group has no security groups
+            # nothing to delete
+            return
         name = node_group.security_groups[-1]
 
         try:

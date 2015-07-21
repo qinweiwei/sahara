@@ -44,12 +44,18 @@ def setup_service_api(ops):
 
 # Cluster ops
 
-def get_clusters():
-    return conductor.cluster_get_all(context.ctx())
+def get_clusters(all_tenants=None):
+    ctx = context.ctx()
+    if all_tenants and int(all_tenants): 
+        ctx.check_admin()
+    return conductor.cluster_get_all(ctx)
 
 
-def get_cluster(id):
-    return conductor.cluster_get(context.ctx(), id)
+def get_cluster(id, all_tenants=None):
+    ctx = context.ctx()
+    if all_tenants and int(all_tenants):
+        ctx.check_admin()
+    return conductor.cluster_get(ctx, id)
 
 
 def scale_cluster(id, data):
@@ -90,6 +96,10 @@ def scale_cluster(id, data):
     OPS.provision_scaled_cluster(id, to_be_enlarged)
     return cluster
 
+def update_cluster(id,data):
+    ctx = context.ctx()
+    OPS.provision_update_cluster(id, data)
+    return conductor.cluster_get(ctx, id)
 
 def create_cluster(values):
     ctx = context.ctx()

@@ -47,6 +47,11 @@ def validate_cluster_creating(pctx, cluster):
             raise ex.RequiredServiceMissingException('resourcemanager',
                                                      required_by='nodemanager')
 
+    mon_count = _get_inst_count(cluster, 'monitornode')
+    if mon_count not in [0, 1]:
+        raise ex.InvalidComponentCountException('monitornode', '0 or 1',
+                                                hs_count)
+
     oo_count = _get_inst_count(cluster, 'oozie')
     dn_count = _get_inst_count(cluster, 'datanode')
     if oo_count not in [0, 1]:
@@ -71,6 +76,11 @@ def validate_cluster_creating(pctx, cluster):
             'datanode', rep_factor, dn_count, _('Number of datanodes must be '
                                                 'not less than '
                                                 'dfs.replication.'))
+
+    hive_count = _get_inst_count(cluster, 'hiveserver')
+    if hive_count not in [0, 1]:
+        raise ex.InvalidComponentCountException('hive', _('0 or 1'),
+                                                hive_count)
 
 
 def validate_additional_ng_scaling(cluster, additional):

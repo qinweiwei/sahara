@@ -93,6 +93,9 @@ class Context(object):
     def is_auth_capable(self):
         return (self.service_catalog and self.token and self.tenant_id and
                 self.user_id)
+    def check_admin(self):
+        if 'admin' in self.roles:
+            self.is_admin = True
 
 
 def get_admin_context():

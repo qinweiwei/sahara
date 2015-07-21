@@ -13,8 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from oslo.config import cfg
 import six
 
+import json
 from sahara.i18n import _LI
 from sahara.openstack.common import log as logging
 from sahara.plugins.vanilla.hadoop2 import config_helper as c_helper
@@ -23,18 +25,144 @@ from sahara.plugins.vanilla import utils as vu
 from sahara.swift import swift_helper as swift
 from sahara.topology import topology_helper as th
 from sahara.utils import files as f
+from sahara.utils import proxy
 from sahara.utils import xmlutils as x
 
+CONF = cfg.CONF
 LOG = logging.getLogger(__name__)
 
 HADOOP_CONF_DIR = '/opt/hadoop/etc/hadoop'
 OOZIE_CONF_DIR = '/opt/oozie/conf'
+HIVE_CONF_DIR = '/opt/hive/conf'
 HADOOP_USER = 'hadoop'
 HADOOP_GROUP = 'hadoop'
 
+def monitor_cluster(pctx, cluster):
+    _set_ganglia_confif(cluster)
+    _set_nagios_config(cluster)
+
+def _set_ganglia_confif(cluster):
+    monitor_node = vu.get_monitornode(cluster)
+    if monitor_node:
+        args = { 'master_server': monitor_node.internal_ip}
+        _set_server_config(cluster, **args)
+        _set_client_config(cluster, **args)
+
+def _set_server_config(cluster, **args):
+    monitor_node = vu.get_monitornode(cluster)
+    args['local_ip'] = monitor_node.internal_ip
+    gmeta_script = f.get_file_text(
+        'plugins/vanilla/ganglia/resources/gmetad.conf.template')
+    gmeta_script = gmeta_script.format(**args)
+
+    hadoop_metrics_script = f.get_file_text(
+        'plugins/vanilla/ganglia/resources/hadoop-metrics2.properties')
+    hadoop_metrics_script = hadoop_metrics_script.format(**args)
+
+    gmon_script = f.get_file_text(
+        'plugins/vanilla/ganglia/resources/gmond.conf.template')
+    gmon_script = gmon_script.format(**args)
+
+    with monitor_node.remote() as m:
+        m.write_file_to('/opt/hadoop/etc/hadoop/hadoop-metrics2.properties', hadoop_metrics_script, run_as_root=True)
+        m.write_file_to('/etc/ganglia/gmond.conf', gmon_script, run_as_root=True)
+        m.execute_command('sudo service gmond start')
+        m.write_file_to('/etc/ganglia/gmetad.conf', gmeta_script, run_as_root=True)
+        m.execute_command('sudo service gmetad start')
+
+def _set_client_config(cluster, **args):
+    for node_group in cluster.node_groups:
+        for instance in node_group.instances:
+            args['local_ip'] = instance.internal_ip
+            if  "monitornode" not in instance.node_group.node_processes:
+                gmon_script = f.get_file_text(
+                    'plugins/vanilla/ganglia/resources/gmond.conf.template')
+                gmon_script = gmon_script.format(**args)
+
+                hadoop_metrics_script = f.get_file_text(
+                    'plugins/vanilla/ganglia/resources/hadoop-metrics2.properties')
+                hadoop_metrics_script = hadoop_metrics_script.format(**args)
+                del args['local_ip']
+
+                with instance.remote() as r:
+                    r.write_file_to('/opt/hadoop/etc/hadoop/hadoop-metrics2.properties', hadoop_metrics_script, run_as_root=True)
+                    r.write_file_to('/etc/ganglia/gmond.conf', gmon_script, run_as_root=True)
+                    r.execute_command('sleep 2 &&sudo service gmond start')
+
+def _set_nagios_config(cluster):
+    monitor_node = vu.get_monitornode(cluster)
+    if monitor_node:
+        _set_nrpe_file(cluster, monitor_node)
+        _set_contact_file(cluster, monitor_node)
+        _set_service_files(cluster, monitor_node)
+
+        with monitor_node.remote() as r:
+            r.execute_command('sudo service nagios start')
+            r.execute_command('sudo chkconfig nagios on')
+            r.execute_command('sudo service httpd start')
+
+def _set_nrpe_file(cluster, monitor_node):
+    master_ip = monitor_node.internal_ip
+    for node_group in cluster.node_groups:
+        for instance in node_group.instances:
+            with instance.remote() as r:
+                r.execute_command(
+                "sudo sed -i 's/allowed_hosts=127.0.0.1/allowed_hosts=127.0.0.1,%s/g' /etc/nagios/nrpe.cfg" % master_ip)
+                r.execute_command("sudo service nrpe restart")
+
+def _set_contact_file(cluster, monitor_node):
+    nagios_config = (monitor_node.node_group.node_configs)['Monitor']
+    LOG.info("==sahara==nagios:%s" % nagios_config)
+    contact_configs = json.loads(nagios_config.get("Contact", ''))
+    contact_scripts = ''
+    members = ''
+    for contact in contact_configs:
+        contact_script = f.get_file_text(
+            'plugins/vanilla/ganglia/resources/contacts.cfg.template')
+        contact_script = contact_script.format(**contact)
+        contact_scripts = ''.join([contact_script, contact_scripts])
+
+        member = contact.get('name', None)
+        members = ','.join([member, members])
+
+    group_script = f.get_file_text(
+            'plugins/vanilla/ganglia/resources/group.cfg.template')
+    group_script = group_script.format(**{'members': members})
+    contact_scripts = ''.join([contact_scripts, group_script])
+    with monitor_node.remote() as r:
+        r.execute_command('sudo usermod -G nagios cloud-user')
+        r.write_file_to('/etc/nagios/objects/contacts.cfg', contact_scripts, run_as_root=True)
+
+def _set_service_files(cluster, monitor_node):
+    nagios_config = (monitor_node.node_group.node_configs)['Monitor']
+    service_configs = json.loads(nagios_config.get("Service", ''))
+    for node_group in cluster.node_groups:
+        for instance in node_group.instances:
+            service_scripts = ''
+            for service in service_configs:
+                service_script = f.get_file_text(
+                    'plugins/vanilla/ganglia/resources/services.cfg.template')
+                service['host_name'] = instance.internal_ip
+                service_script = service_script.format(**service)
+                service_scripts = ''.join([service_script, service_scripts])
+
+            host_script = f.get_file_text(
+                    'plugins/vanilla/ganglia/resources/hosts.cfg.template')
+            host_script = host_script.format(**{"host_name": instance.internal_ip})
+
+            service_scripts = ''.join([host_script, service_scripts])
+            with monitor_node.remote() as r:
+                r.execute_command('sudo touch /tmp/service.cfg')
+                r.write_file_to('/tmp/service.cfg', service_scripts, run_as_root=True)
+                r.execute_command('sudo chmod 666 /tmp/service.cfg')
+                r.execute_command('sudo cp /tmp/service.cfg  /etc/nagios/objects/%s.cfg' % instance.internal_ip)
 
 def configure_cluster(pctx, cluster):
     LOG.debug("Configuring cluster \"%s\"", cluster.name)
+    if (CONF.use_identity_api_v3 and vu.get_hiveserver(cluster) and
+            c_helper.is_swift_enabled(pctx, cluster)):
+        cluster = proxy.create_proxy_user_for_cluster(cluster)
+
     instances = []
     for node_group in cluster.node_groups:
         for instance in node_group.instances:
@@ -125,6 +253,43 @@ def _get_hadoop_configs(pctx, node_group):
         confs['Hadoop'].update({"topology.script.file.name":
                                 HADOOP_CONF_DIR + "/topology.sh"})
 
+    hive_hostname = vu.get_instance_hostname(vu.get_hiveserver(cluster))
+    if hive_hostname:
+        hive_cfg = {
+            'hive.warehouse.subdir.inherit.perms': True,
+            'javax.jdo.option.ConnectionURL':
+            'jdbc:derby:;databaseName=/opt/hive/metastore_db;create=true'
+        }
+        metastore_value = c_helper.hive_metastore_value(pctx, cluster)
+        if metastore_value == c_helper.HIVE_METASTOER_RDS:
+            hive_cfg.pop('javax.jdo.option.ConnectionURL')
+            hive_cfg.update({
+                'javax.jdo.option.ConnectionDriverName':
+                'com.mysql.jdbc.Driver',
+                'hive.metastore.uris': 'thrift://%s:9083' % hive_hostname,
+            })
+        elif metastore_value == c_helper.HIVE_METASTOER_MYSQL:
+            hive_cfg.update({
+                'javax.jdo.option.ConnectionURL':
+                'jdbc:mysql://localhost/metastore',
+                'javax.jdo.option.ConnectionDriverName':
+                'com.mysql.jdbc.Driver',
+                'javax.jdo.option.ConnectionUserName': 'hive',
+                'javax.jdo.option.ConnectionPassword': 'pass',
+                'hive.metastore.uris': 'thrift://%s:9083' % hive_hostname,
+            })
+
+        proxy_configs = cluster.cluster_configs.get('proxy_configs')
+        if proxy_configs and c_helper.is_swift_enabled(pctx, cluster):
+            hive_cfg.update({
+                swift.HADOOP_SWIFT_USERNAME: proxy_configs['proxy_username'],
+                swift.HADOOP_SWIFT_PASSWORD: proxy_configs['proxy_password'],
+                swift.HADOOP_SWIFT_TRUST_ID: proxy_configs['proxy_trust_id'],
+                swift.HADOOP_SWIFT_DOMAIN_NAME: CONF.proxy_user_domain_name
+            })
+
+        confs['Hive'] = hive_cfg
+
     return confs
 
 
@@ -208,7 +373,8 @@ def _push_xml_configs(instance, configs):
         'HDFS': '%s/hdfs-site.xml' % HADOOP_CONF_DIR,
         'YARN': '%s/yarn-site.xml' % HADOOP_CONF_DIR,
         'MapReduce': '%s/mapred-site.xml' % HADOOP_CONF_DIR,
-        'JobFlow': '%s/oozie-site.xml' % OOZIE_CONF_DIR
+        'JobFlow': '%s/oozie-site.xml' % OOZIE_CONF_DIR,
+        'Hive': '%s/hive-site.xml' % HIVE_CONF_DIR
     }
     xml_confs = {}
     for service, confs in six.iteritems(xmls):

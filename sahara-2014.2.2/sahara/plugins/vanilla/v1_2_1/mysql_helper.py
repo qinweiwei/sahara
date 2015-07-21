@@ -16,11 +16,20 @@
 
 def get_hive_mysql_configs(metastore_host, passwd):
     return {
-        'javax.jdo.option.ConnectionURL': 'jdbc:mysql://%s/metastore' %
-        metastore_host,
+        #'javax.jdo.option.ConnectionURL': 'jdbc:mysql://%s/metastore' %
+        #metastore_host,
+        'javax.jdo.option.ConnectionURL': 'jdbc:mysql://localhost/metastore',
         'javax.jdo.option.ConnectionDriverName': 'com.mysql.jdbc.Driver',
         'javax.jdo.option.ConnectionUserName': 'hive',
         'javax.jdo.option.ConnectionPassword': passwd,
+        'datanucleus.autoCreateSchema': 'false',
+        'datanucleus.fixedDatastore': 'true',
+        'hive.metastore.uris': 'thrift://%s:9083' % metastore_host,
+    }
+
+def get_hive_mysql_remote_configs(metastore_host, passwd):
+    return {
+        'javax.jdo.option.ConnectionDriverName': 'com.mysql.jdbc.Driver',
         'datanucleus.autoCreateSchema': 'false',
         'datanucleus.fixedDatastore': 'true',
         'hive.metastore.uris': 'thrift://%s:9083' % metastore_host,
@@ -40,6 +49,12 @@ def get_oozie_mysql_configs():
 
 def get_required_mysql_configs(hive_hostname, passwd_mysql):
     configs = get_oozie_mysql_configs()
-    if hive_hostname:
+    return configs
+
+def get_required_hive_metastore_configs(metastore_type, hive_hostname, passwd_mysql):
+    configs = {}
+    if metastore_type == 1:
         configs.update(get_hive_mysql_configs(hive_hostname, passwd_mysql))
+    elif metastore_type == 2:
+        configs.update(get_hive_mysql_remote_configs(hive_hostname, passwd_mysql))
     return configs

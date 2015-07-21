@@ -27,6 +27,7 @@ from sahara.plugins.vanilla.hadoop2 import scaling as sc
 from sahara.plugins.vanilla.hadoop2 import validation as vl
 from sahara.plugins.vanilla import utils as vu
 from sahara.plugins.vanilla.v2_4_1 import config_helper as c_helper
+from sahara.utils import proxy
 
 
 conductor = conductor.API
@@ -50,7 +51,9 @@ class VersionHandler(avm.AbstractVersionHandler):
             "MapReduce": ["historyserver"],
             "HDFS": ["namenode", "datanode", "secondarynamenode"],
             "YARN": ["resourcemanager", "nodemanager"],
-            "JobFlow": ["oozie"]
+            "JobFlow": ["oozie"],
+            "Hive": ["hiveserver"],
+            "Monitor": ["monitornode"]
         }
 
     def validate(self, cluster):
@@ -61,6 +64,9 @@ class VersionHandler(avm.AbstractVersionHandler):
 
     def configure_cluster(self, cluster):
         c.configure_cluster(self.pctx, cluster)
+
+    def monitor_cluster(self, cluster):
+        c.monitor_cluster(self.pctx, cluster)
 
     def start_cluster(self, cluster):
         nn = vu.get_namenode(cluster)
@@ -87,6 +93,10 @@ class VersionHandler(avm.AbstractVersionHandler):
         if oo:
             run.start_oozie_process(self.pctx, oo)
 
+        hiveserver = vu.get_hiveserver(cluster)
+        if hiveserver:
+            run.start_hiveserver_process(self.pctx, hiveserver)
+
         self._set_cluster_info(cluster)
 
     def decommission_nodes(self, cluster, instances):
@@ -104,6 +114,7 @@ class VersionHandler(avm.AbstractVersionHandler):
         rm = vu.get_resourcemanager(cluster)
         hs = vu.get_historyserver(cluster)
         oo = vu.get_oozie(cluster)
+        mn = vu.get_monitornode(cluster)
 
         info = {}
 
@@ -129,6 +140,12 @@ class VersionHandler(avm.AbstractVersionHandler):
                 'Web UI': 'http://%s:%s' % (hs.management_ip, '19888')
             }
 
+        if mn:
+            info['Monitor'] = {
+                'Ganglia UI': 'http://%s/ganglia' % (mn.management_ip),
+                'Nagios UI': 'http://%s/nagios' % (mn.management_ip)   
+            }
+
         ctx = context.ctx()
         conductor.cluster_update(ctx, cluster, {'info': info})
 
@@ -139,3 +156,6 @@ class VersionHandler(avm.AbstractVersionHandler):
 
     def get_open_ports(self, node_group):
         return c.get_open_ports(node_group)
+
+    def on_terminate_cluster(self, cluster):
+        proxy.delete_proxy_user_for_cluster(cluster)

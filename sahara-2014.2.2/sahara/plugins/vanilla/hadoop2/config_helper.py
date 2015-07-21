@@ -121,10 +121,16 @@ ENABLE_MYSQL = p.Config('Enable MySQL', 'general', 'cluster',
                         config_type="bool", priority=1,
                         default_value=True, is_optional=True)
 
+ENABLE_HIVE_METASTORE = p.Config('Enable Hive Metastore', 'general', 'cluster',
+                        config_type="int", priority=1,
+                        default_value=1, is_optional=True)
+
 ENABLE_DATA_LOCALITY = p.Config('Enable Data Locality', 'general', 'cluster',
                                 config_type="bool", priority=1,
                                 default_value=True, is_optional=True)
-
+HIVE_METASTORE_LOCAL = 0
+HIVE_METASTOER_MYSQL = 1
+HIVE_METASTOER_RDS = 2
 
 def init_env_configs(env_confs):
     configs = []
@@ -138,7 +144,7 @@ def init_env_configs(env_confs):
 
 
 def _init_general_configs():
-    configs = [ENABLE_SWIFT, ENABLE_MYSQL]
+    configs = [ENABLE_SWIFT, ENABLE_MYSQL, ENABLE_HIVE_METASTORE]
     if CONF.enable_data_locality:
         configs.append(ENABLE_DATA_LOCALITY)
     return configs
@@ -166,6 +172,9 @@ def is_swift_enabled(pctx, cluster):
     return get_config_value(pctx, ENABLE_SWIFT.applicable_target,
                             ENABLE_SWIFT.name, cluster)
 
+def hive_metastore_value(pctx, cluster):
+    return get_config_value(pctx, ENABLE_HIVE_METASTORE.applicable_target,
+                            ENABLE_HIVE_METASTORE.name, cluster)
 
 def is_mysql_enabled(pctx, cluster):
     return get_config_value(

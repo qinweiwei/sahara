@@ -1,0 +1,7 @@
+define host{{
+        use                     linux-server
+        host_name               {host_name}
+        alias                   {host_name}
+        address                 {host_name}
+        }}
+

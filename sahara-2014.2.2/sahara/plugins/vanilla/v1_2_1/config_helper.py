@@ -88,6 +88,13 @@ ENABLE_MYSQL = p.Config('Enable MySQL', 'general', 'cluster',
                         config_type="bool", priority=1,
                         default_value=True, is_optional=True)
 
+ENABLE_HIVE_METASTORE = p.Config('Enable Hive Metastore', 'general', 'cluster',
+                        config_type="int", priority=1,
+                        default_value=1, is_optional=True)
+HIVE_METASTORE_LOCAL = 0
+HIVE_METASTOER_MYSQL = 1
+HIVE_METASTOER_RDS = 2
+
 # Default set to 1 day, which is the default Keystone token
 # expiration time. After the token is expired we can't continue
 # scaling anyway.
@@ -159,6 +166,7 @@ def _initialise_configs():
 
     configs.append(ENABLE_SWIFT)
     configs.append(ENABLE_MYSQL)
+    configs.append(ENABLE_HIVE_METASTORE)
     configs.append(DECOMMISSIONING_TIMEOUT)
     if CONF.enable_data_locality:
         configs.append(ENABLE_DATA_LOCALITY)
@@ -177,12 +185,23 @@ def get_general_configs(hive_hostname, passwd_hive_mysql):
     config = {
         ENABLE_SWIFT.name: {
             'default_value': ENABLE_SWIFT.default_value,
-            'conf': extract_name_values(swift.get_swift_configs())
+            'conf': {
+             ENABLE_SWIFT.default_value : extract_name_values(swift.get_swift_configs())
+             }
         },
         ENABLE_MYSQL.name: {
             'default_value': ENABLE_MYSQL.default_value,
-            'conf': m_h.get_required_mysql_configs(
+            'conf': {
+            ENABLE_SWIFT.default_value : m_h.get_required_mysql_configs(
                 hive_hostname, passwd_hive_mysql)
+            }
+        },
+        ENABLE_HIVE_METASTORE.name: {
+            'default_value': ENABLE_HIVE_METASTORE.default_value,
+            'conf': {
+            1 : m_h.get_required_hive_metastore_configs(1, hive_hostname, passwd_hive_mysql),
+            2 : m_h.get_required_hive_metastore_configs(2, hive_hostname, passwd_hive_mysql)
+            }
         }
     }
     if CONF.enable_data_locality:
@@ -223,7 +242,7 @@ def generate_cfg_from_general(cfg, configs, general_config,
                 configs['general'][nm] = general_config[nm]['default_value']
         for name, value in configs['general'].items():
             if value:
-                cfg = _set_config(cfg, general_config, name)
+                cfg = _set_config(cfg, general_config, name, value)
                 LOG.info(_LI("Applying config: %s"), name)
     else:
         cfg = _set_config(cfg, general_config)
@@ -334,8 +353,15 @@ def generate_xml_configs(cluster, node_group, hive_mysql_passwd):
     }
 
     if hive_hostname:
+        cfg = all_cfg
+        cfg_filter = HIVE_DEFAULT
+        proxy_configs = cluster.cluster_configs.get('proxy_configs')
+        if CONF.use_identity_api_v3 and proxy_configs:
+            cfg, cfg_filter = _inject_swift_trust_info(cfg,
+                                                       cfg_filter,
+                                                       proxy_configs)
         xml_configs.update({'hive-site':
-                            x.create_hadoop_xml(all_cfg, HIVE_DEFAULT)})
+                            x.create_hadoop_xml(cfg, cfg_filter)})
         LOG.debug('Generated hive-site.xml for hive % s', hive_hostname)
 
     if oozie_hostname:
@@ -344,6 +370,26 @@ def generate_xml_configs(cluster, node_group, hive_mysql_passwd):
         LOG.debug('Generated oozie-site.xml for oozie % s', oozie_hostname)
 
     return xml_configs
+
+
+def _inject_swift_trust_info(cfg, cfg_filter, proxy_configs):
+    cfg = cfg.copy()
+    cfg.update({
+        swift.HADOOP_SWIFT_USERNAME: proxy_configs['proxy_username'],
+        swift.HADOOP_SWIFT_PASSWORD: proxy_configs['proxy_password'],
+        swift.HADOOP_SWIFT_TRUST_ID: proxy_configs['proxy_trust_id'],
+        swift.HADOOP_SWIFT_DOMAIN_NAME: CONF.proxy_user_domain_name
+    })
+
+    allow_swift_auth_filter = [
+        {'name': swift.HADOOP_SWIFT_USERNAME},
+        {'name': swift.HADOOP_SWIFT_PASSWORD},
+        {'name': swift.HADOOP_SWIFT_TRUST_ID},
+        {'name': swift.HADOOP_SWIFT_DOMAIN_NAME}
+    ]
+    cfg_filter = cfg_filter + allow_swift_auth_filter
+
+    return cfg, cfg_filter
 
 
 def extract_environment_confs(configs):
@@ -423,12 +469,15 @@ def extract_hadoop_path(lst, hadoop_dir):
         return ",".join([p + hadoop_dir for p in lst])
 
 
-def _set_config(cfg, gen_cfg, name=None):
+def _set_config(cfg, gen_cfg, name=None, value=None):
     if name in gen_cfg:
-        cfg.update(gen_cfg[name]['conf'])
+        if value is None:
+            value = gen_cfg[name]['default_value']
+        cfg.update(gen_cfg[name]['conf'][value])
     if name is None:
         for name in gen_cfg:
-            cfg.update(gen_cfg[name]['conf'])
+            value = gen_cfg[name]['default_value']
+            cfg.update(gen_cfg[name]['conf'][value])
     return cfg
 
 
@@ -444,11 +493,18 @@ def _get_general_cluster_config_value(cluster, option):
 def is_mysql_enable(cluster):
     return _get_general_cluster_config_value(cluster, ENABLE_MYSQL)
 
+def hive_metastore_value(cluster):
+    return _get_general_cluster_config_value(cluster, ENABLE_HIVE_METASTORE)
+
 
 def is_data_locality_enabled(cluster):
     if not CONF.enable_data_locality:
         return False
     return _get_general_cluster_config_value(cluster, ENABLE_DATA_LOCALITY)
+
+
+def is_swift_enable(cluster):
+    return _get_general_cluster_config_value(cluster, ENABLE_SWIFT)
 
 
 def get_decommissioning_timeout(cluster):
