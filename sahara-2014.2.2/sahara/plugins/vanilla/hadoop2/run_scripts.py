@@ -216,7 +216,7 @@ def start_hiveserver_process(pctx, instance):
                      instance.hostname())
         elif metastore_value == c_helper.HIVE_METASTOER_MYSQL:
             oozie = vu.get_oozie(instance.node_group.cluster)
-            if not oozie or instance.hostname() != oozie.hostname():
+            if not oozie or instance.hostname() != oozie.hostname() or not c_helper.is_mysql_enabled(pctx, instance.node_group.cluster):
                 _start_mysql(r)
 
             sql_script = files.get_file_text(
