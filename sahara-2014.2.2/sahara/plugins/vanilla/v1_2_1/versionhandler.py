@@ -53,7 +53,8 @@ class VersionHandler(avm.AbstractVersionHandler):
             "HDFS": ["namenode", "datanode", "secondarynamenode"],
             "MapReduce": ["tasktracker", "jobtracker"],
             "JobFlow": ["oozie"],
-            "Hive": ["hiveserver"]
+            "Hive": ["hiveserver"],
+            "Monitor": ["monitornode"]
         }
 
     def validate(self, cluster):
@@ -288,6 +289,14 @@ class VersionHandler(avm.AbstractVersionHandler):
         all_instances = utils.get_instances(cluster)
         new_ids = set([instance.id for instance in new_instances])
         with context.ThreadGroup() as tg:
+            monitor_node = vu.get_monitornode(cluster)
+            if monitor_node:
+                gmond_config = c_helper.generate_monitor_client_configs(
+                               monitor_node.internal_ip, monitor_node.internal_ip)
+                with monitor_node.remote() as r:
+                    r.write_files_to(gmond_config, run_as_root=True)
+                    r.execute_command("sudo service gmond start")
+                    r.execute_command("sudo service gmetad start")
             for instance in all_instances:
                 if instance.id in new_ids:
                     tg.spawn('vanilla-configure-%s' % instance.instance_name,
@@ -302,6 +311,10 @@ class VersionHandler(avm.AbstractVersionHandler):
         ng_extra = extra[instance.node_group.id]
         private_key, public_key = c_helper.get_hadoop_ssh_keys(cluster)
 
+        monitor_node = vu.get_monitornode(cluster)
+        monitor_configs = None
+        if monitor_node:
+            monitor_configs = c_helper.generate_monitor_client_configs(monitor_node.internal_ip, instance.internal_ip)
         files = {
             '/etc/hadoop/core-site.xml': ng_extra['xml']['core-site'],
             '/etc/hadoop/mapred-site.xml': ng_extra['xml']['mapred-site'],
@@ -318,6 +331,12 @@ class VersionHandler(avm.AbstractVersionHandler):
 
         with remote.get_remote(instance) as r:
             # TODO(aignatov): sudo chown is wrong solution. But it works.
+            if monitor_configs:
+                r.write_files_to(monitor_configs,run_as_root=True)
+                r.execute_command("sudo service gmond restart")
+                r.execute_command(
+                "sudo sed -i 's/allowed_hosts=127.0.0.1/allowed_hosts=127.0.0.1,%s/g' /etc/nagios/nrpe.cfg" % monitor_node.internal_ip)
+                r.execute_command("sudo service nrpe restart")
             r.execute_command(
                 'sudo chown -R $USER:$USER /etc/hadoop'
             )
@@ -382,6 +401,28 @@ class VersionHandler(avm.AbstractVersionHandler):
         if 'hiveserver' in node_processes:
             self._push_hive_configs(ng_extra, r)
 
+        if  'monitornode' in node_processes:
+            self._push_monitor_config(cluster, r)
+
+
+    def _push_monitor_config(self, cluster, r):
+        monitor_node = vu.get_monitornode(cluster)
+
+        services_config = c_helper.get_service_files(cluster)
+
+        r.execute_command('sudo touch /tmp/service.cfg')
+        r.write_files_to(services_config, run_as_root=True)
+        r.execute_command('sudo chmod 666 /tmp/service.cfg')
+        r.execute_command('sudo cp /tmp/service.cfg  /etc/nagios/objects/%s.cfg' % monitor_node.internal_ip)
+
+        contacts_config = c_helper.get_contact_file(cluster)
+        r.execute_command('sudo usermod -G nagios cloud-user')
+        r.write_files_to(contacts_config, run_as_root=True)
+
+        r.execute_command('sudo service nagios start')
+        r.execute_command('sudo chkconfig nagios on')
+        r.execute_command('sudo service httpd start')
+
     def _push_namenode_configs(self, cluster, r):
         r.write_file_to('/etc/hadoop/dn.incl',
                         utils.generate_fqdn_host_names(
@@ -407,6 +448,7 @@ class VersionHandler(avm.AbstractVersionHandler):
         nn = vu.get_namenode(cluster)
         jt = vu.get_jobtracker(cluster)
         oozie = vu.get_oozie(cluster)
+        mon = vu.get_monitornode(cluster)
         info = {}
 
         if jt:
@@ -429,6 +471,11 @@ class VersionHandler(avm.AbstractVersionHandler):
             info['HDFS'] = {
                 'Web UI': 'http://%s:%s' % (nn.management_ip, ui_port),
                 'NameNode': 'hdfs://%s:%s' % (nn.hostname(), nn_port)
+            }
+          
+        if mon:
+            info['Monitor'] = {
+                'Monitor UI': 'http://%s/ganglia' % mon.management_ip
             }
 
         if oozie:

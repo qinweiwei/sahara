@@ -14,13 +14,14 @@
 # limitations under the License.
 
 from oslo.config import cfg
-
+import json
 from sahara import conductor as c
 from sahara import context
 from sahara import exceptions as ex
 from sahara.i18n import _
 from sahara.i18n import _LI
 from sahara.i18n import _LW
+from sahara.utils import files as f
 from sahara.openstack.common import log as logging
 from sahara.plugins.general import utils
 from sahara.plugins import provisioning as p
@@ -75,6 +76,13 @@ ENV_CONFS = {
         'Oozie Heap Size': 'CATALINA_OPTS -Xmx%sm'
     }
 }
+MONITOR_CONFS = {
+    "Monitor": {
+       "Contact": [],
+       "Service": []
+    }
+}
+
 
 ENABLE_SWIFT = p.Config('Enable Swift', 'general', 'cluster',
                         config_type="bool", priority=1,
@@ -159,6 +167,12 @@ def _initialise_configs():
                     configs.append(cfg)
 
     for service, config_items in ENV_CONFS.iteritems():
+        for name, param_format_str in config_items.iteritems():
+            configs.append(p.Config(name, service, "node",
+                                    default_value=1024, priority=1,
+                                    config_type="int"))
+
+    for service, config_items in MONITOR_CONFS.iteritems():
         for name, param_format_str in config_items.iteritems():
             configs.append(p.Config(name, service, "node",
                                     default_value=1024, priority=1,
@@ -371,6 +385,65 @@ def generate_xml_configs(cluster, node_group, hive_mysql_passwd):
 
     return xml_configs
 
+def generate_monitor_client_configs(master_ip, client_ip):
+    gmon_script = f.get_file_text(
+        'plugins/vanilla/ganglia/resources/gmond.conf.template')
+    gmon_script = gmon_script.format(**{'master_server': master_ip,'local_ip': client_ip})
+
+    hadoop_metrics_script = f.get_file_text(
+        'plugins/vanilla/ganglia/resources/hadoop-metrics.properties')
+    hadoop_metrics_script = hadoop_metrics_script.format(**{'master_server': master_ip,'local_ip': client_ip})
+    m_configs = {
+        '/etc/ganglia/gmond.conf': gmon_script,
+        '/etc/hadoop/hadoop-metrics2.properties': hadoop_metrics_script
+    }
+    return m_configs
+
+def get_contact_file(cluster):
+    monitor_node = vu.get_monitornode(cluster)
+    nagios_config = (monitor_node.node_group.node_configs)['Monitor']
+    LOG.info("==sahara==nagios:%s" % nagios_config)
+    contact_configs = json.loads(nagios_config.get("Contact", ''))
+    contact_scripts = ''
+    members = ''
+    for contact in contact_configs:
+        contact_script = f.get_file_text(
+            'plugins/vanilla/ganglia/resources/contacts.cfg.template')
+        contact_script = contact_script.format(**contact)
+        contact_scripts = ''.join([contact_script, contact_scripts])
+
+        member = contact.get('name', None)
+        members = ','.join([member, members])
+
+    group_script = f.get_file_text(
+            'plugins/vanilla/ganglia/resources/group.cfg.template')
+    group_script = group_script.format(**{'members': members})
+    contact_scripts = ''.join([contact_scripts, group_script])
+
+    return {'/etc/nagios/objects/contacts.cfg': contact_scripts}
+
+
+def get_service_files(cluster):
+    monitor_node = vu.get_monitornode(cluster)
+    nagios_config = (monitor_node.node_group.node_configs)['Monitor']
+    service_configs = json.loads(nagios_config.get("Service", ''))
+    service_scripts = ''
+    
+    for node_group in cluster.node_groups:
+        for instance in node_group.instances:
+            for service in service_configs:
+                service_script = f.get_file_text(
+                    'plugins/vanilla/ganglia/resources/services.cfg.template')
+                service['host_name'] = instance.internal_ip
+                service_script = service_script.format(**service)
+                service_scripts = ''.join([service_script, service_scripts])
+
+            host_script = f.get_file_text(
+                    'plugins/vanilla/ganglia/resources/hosts.cfg.template')
+            host_script = host_script.format(**{"host_name": instance.internal_ip})
+
+            service_scripts = ''.join([host_script, service_scripts])
+    return {'/tmp/service.cfg': service_scripts}
 
 def _inject_swift_trust_info(cfg, cfg_filter, proxy_configs):
     cfg = cfg.copy()
